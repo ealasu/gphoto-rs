@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 use std::ffi::CStr;
 use std::mem;
+use std::ptr;
+use std::fmt;
+use libc::{c_int, free};
 
 use ::context::Context;
 use ::abilities::Abilities;
@@ -49,6 +52,34 @@ impl Camera {
         };
 
         Ok(CameraFile { inner: file_path })
+    }
+
+    pub fn trigger_capture(&mut self, context: &mut Context) -> ::Result<()> {
+        try_unsafe! {
+            ::gphoto2::gp_camera_trigger_capture(self.camera, context.as_mut_ptr())
+        };
+        Ok(())
+    }
+
+    pub fn wait_for_file(&mut self, context: &mut Context, timeout: u32) -> ::Result<Option<CameraFile>> {
+        loop {
+            let mut event = ::gphoto2::CameraEventType::GP_EVENT_UNKNOWN;
+            let mut data = ptr::null_mut();
+            try_unsafe! {
+                ::gphoto2::gp_camera_wait_for_event(self.camera, timeout as c_int, &mut event, &mut data, context.as_mut_ptr())
+            };
+            // TODO: free data
+            res = match event {
+                ::gphoto2::CameraEventType::GP_EVENT_FILE_ADDED => {
+                    let file = unsafe { (*(data as *const ::gphoto2::CameraFilePath)).clone() };
+                    Ok(Some(CameraFile { inner: file }))
+                }
+                ::gphoto2::CameraEventType::GP_EVENT_TIMEOUT => {
+                    Ok(None)
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Downloads a file from the camera.
@@ -165,6 +196,7 @@ impl Camera {
 
 
 /// A file stored on a camera's storage.
+#[derive(Clone)]
 pub struct CameraFile {
     inner: ::gphoto2::CameraFilePath,
 }
@@ -182,6 +214,12 @@ impl CameraFile {
         unsafe {
             String::from_utf8_lossy(CStr::from_ptr(self.inner.name.as_ptr()).to_bytes())
         }
+    }
+}
+
+impl fmt::Debug for CameraFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CameraFile {{ directory: {}, basename: {} }}", self.directory(), self.basename())
     }
 }
 
