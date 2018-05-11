@@ -68,16 +68,23 @@ impl Camera {
             try_unsafe! {
                 ::gphoto2::gp_camera_wait_for_event(self.camera, timeout as c_int, &mut event, &mut data, context.as_mut_ptr())
             };
-            // TODO: free data
-            res = match event {
+            match event {
                 ::gphoto2::CameraEventType::GP_EVENT_FILE_ADDED => {
                     let file = unsafe { (*(data as *const ::gphoto2::CameraFilePath)).clone() };
-                    Ok(Some(CameraFile { inner: file }))
+                    unsafe { free(data); }
+                    return Ok(Some(CameraFile { inner: file }))
                 }
                 ::gphoto2::CameraEventType::GP_EVENT_TIMEOUT => {
-                    Ok(None)
+                    if !data.is_null() {
+                        unsafe { free(data); }
+                    }
+                    return Ok(None)
                 }
-                _ => {}
+                _ => {
+                    if !data.is_null() {
+                        unsafe { free(data); }
+                    }
+                }
             }
         }
     }
